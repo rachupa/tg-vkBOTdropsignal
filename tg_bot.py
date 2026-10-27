@@ -6,8 +6,9 @@ import os
 import random
 import sqlite3
 import urllib.parse
+import time
 from contextlib import contextmanager
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
@@ -32,8 +33,8 @@ DEVELOPER_MESSAGE_TEMPLATE = (
 PDF_PATH = "documents/p_72.pdf"
 # Видеораздел. Ссылки задаются в .env, чтобы их можно было менять без правки кода.
 VIDEO_MAIN_URL = os.getenv("VIDEO_MAIN_URL", "https://youtu.be/DD94Hkeodlc").strip()
-VIDEO_SHORT_1_URL = os.getenv("VIDEO_SHORT_1_URL", "https://youtube.com/shorts/tlZ1j-yC3tE?feature=share").strip()
-VIDEO_SHORT_2_URL = os.getenv("VIDEO_SHORT_2_URL", "https://youtube.com/shorts/BMCvTGrwSiY?feature=share").strip()
+VIDEO_SHORT_1_URL = os.getenv("VIDEO_SHORT_1_URL", "https://youtube.com/shorts/i8DUU8-tvGc?feature=share").strip()
+VIDEO_SHORT_2_URL = os.getenv("VIDEO_SHORT_2_URL", "https://youtube.com/shorts/MtRXaOGO8Es?feature=share").strip()
 VIDEO_SHORT_3_URL = os.getenv("VIDEO_SHORT_3_URL", "https://youtube.com/shorts/7OAKXIL2GEA?feature=share").strip()
 VIDEO_SHORT_4_URL = os.getenv("VIDEO_SHORT_4_URL", "https://youtube.com/shorts/18rc6ymUk6I?feature=share").strip()
 # Изображения разделов. Добавьте файлы с этими именами в папку images.
@@ -726,6 +727,29 @@ if not TOKEN:
     )
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+class ProcessingLogMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        user_id = getattr(user, "id", None)
+        if isinstance(event, CallbackQuery):
+            action = event.data or "callback"
+        elif isinstance(event, Message):
+            action = (event.text or event.caption or "message")[:80]
+        else:
+            action = event.__class__.__name__
+        started = time.perf_counter()
+        logging.getLogger(__name__).info("TG <- user_id=%s action=%s", user_id, action)
+        try:
+            return await handler(event, data)
+        finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            logging.getLogger(__name__).info(
+                "TG -> user_id=%s action=%s processed=%.1fms", user_id, action, elapsed_ms
+            )
+
+dp.message.outer_middleware(ProcessingLogMiddleware())
+dp.callback_query.outer_middleware(ProcessingLogMiddleware())
 def build_main_menu_text(session: dict) -> str:
     """Формирует текст главного меню на основе уже загруженного прогресса."""
     base_text = (
@@ -1207,8 +1231,19 @@ async def main():
         "Бот «Дроп-Сигнал» запускается; кейсов: %s; база: %s",
         len(SCENARIOS), DB_FILE,
     )
+    retry_delay = 3
     try:
-        await dp.start_polling(bot)
+        while True:
+            try:
+                logging.getLogger(__name__).info("Telegram polling подключается...")
+                await dp.start_polling(bot)
+                logging.getLogger(__name__).warning("Telegram polling завершился без ошибки; перезапуск через %s сек.", retry_delay)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Telegram polling упал. Автоперезапуск через %s сек.", retry_delay
+                )
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 30)
     finally:
         await bot.session.close()
 if __name__ == "__main__":
