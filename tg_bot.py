@@ -33,7 +33,7 @@ PDF_PATH = "documents/p_72.pdf"
 # Видеораздел. Ссылки задаются в .env, чтобы их можно было менять без правки кода.
 VIDEO_MAIN_URL = os.getenv("VIDEO_MAIN_URL", "https://youtu.be/DD94Hkeodlc").strip()
 VIDEO_SHORT_1_URL = os.getenv("VIDEO_SHORT_1_URL", "https://youtube.com/shorts/i8DUU8-tvGc?feature=share").strip()
-VIDEO_SHORT_2_URL = os.getenv("VIDEO_SHORT_2_URL", "https://youtube.com/shorts/MtRXaOGO8Es?feature=share").strip()
+VIDEO_SHORT_2_URL = os.getenv("VIDEO_SHORT_2_URL", "https://youtube.com/shorts/BMCvTGrwSiY?feature=share").strip()
 VIDEO_SHORT_3_URL = os.getenv("VIDEO_SHORT_3_URL", "https://youtube.com/shorts/7OAKXIL2GEA?feature=share").strip()
 VIDEO_SHORT_4_URL = os.getenv("VIDEO_SHORT_4_URL", "https://youtube.com/shorts/18rc6ymUk6I?feature=share").strip()
 # Изображения разделов. Добавьте файлы с этими именами в папку images.
