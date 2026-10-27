@@ -11,6 +11,7 @@ import random
 import re
 import sqlite3
 import time
+import requests
 from contextlib import contextmanager
 from pathlib import Path
 import vk_api
@@ -865,25 +866,45 @@ def main():
     for relative_path in [MAIN_MENU_PHOTO_PATH, *[item.get("image_path", "") for item in SCENARIOS], *SECTION_PHOTO_PATHS.values()]:
         if relative_path and not (PROJECT_DIR / relative_path).is_file():
             logging.warning("Файл ресурса не найден (бот продолжит без него): %s", relative_path)
-    for event in longpoll.listen():
+    reconnect_delay = 3
+    while True:
         try:
-            if event.type == VkBotEventType.MESSAGE_NEW:
-                obj = event.object.message if hasattr(event.object,"message") else event.object.get("message", event.object)
-                peer_id = obj.peer_id if hasattr(obj,"peer_id") else obj.get("peer_id")
-                user_id = obj.from_id if hasattr(obj,"from_id") else obj.get("from_id")
-                text = obj.text if hasattr(obj,"text") else obj.get("text","")
-                raw_payload = obj.payload if hasattr(obj,"payload") else obj.get("payload")
+            current_longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+            logging.info("VK Long Poll подключён и ожидает события")
+            reconnect_delay = 3
+            for event in current_longpoll.listen():
                 try:
-                    payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
-                except (json.JSONDecodeError, TypeError):
-                    payload = raw_payload
-                if peer_id and user_id:
-                    logging.debug(
-                        "VK message received: user_id=%s payload_type=%s",
-                        user_id, type(payload).__name__,
-                    )
-                    handle(int(peer_id), int(user_id), payload, text or "")
+                    if event.type == VkBotEventType.MESSAGE_NEW:
+                        obj = event.object.message if hasattr(event.object,"message") else event.object.get("message", event.object)
+                        peer_id = obj.peer_id if hasattr(obj,"peer_id") else obj.get("peer_id")
+                        user_id = obj.from_id if hasattr(obj,"from_id") else obj.get("from_id")
+                        text = obj.text if hasattr(obj,"text") else obj.get("text","")
+                        raw_payload = obj.payload if hasattr(obj,"payload") else obj.get("payload")
+                        try:
+                            payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+                        except (json.JSONDecodeError, TypeError):
+                            payload = raw_payload
+                        if peer_id and user_id:
+                            action = extract_action(payload) or resolve_text_action(text or "") or "message"
+                            started = time.perf_counter()
+                            logging.info("VK <- user_id=%s action=%s", user_id, str(action)[:80])
+                            try:
+                                handle(int(peer_id), int(user_id), payload, text or "")
+                            finally:
+                                elapsed_ms = (time.perf_counter() - started) * 1000
+                                logging.info("VK -> user_id=%s action=%s processed=%.1fms", user_id, str(action)[:80], elapsed_ms)
+                except Exception:
+                    logging.exception("Ошибка при обработке события VK")
+        except requests.exceptions.RequestException as exc:
+            logging.warning(
+                "VK Long Poll: сеть недоступна (%s). Переподключение через %s сек.",
+                exc.__class__.__name__, reconnect_delay,
+            )
+            time.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 30)
         except Exception:
-            logging.exception("Ошибка при обработке события VK")
+            logging.exception("VK Long Poll неожиданно завершился. Перезапуск через %s сек.", reconnect_delay)
+            time.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 30)
 if __name__ == "__main__":
     main()
